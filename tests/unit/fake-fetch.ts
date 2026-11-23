@@ -15,13 +15,18 @@ export interface Route {
 }
 
 export class FakeFetch {
-  readonly calls: { url: string; signal?: AbortSignal; range?: string }[] = [];
+  readonly calls: { url: string; signal?: AbortSignal; range?: string; cache?: RequestCache }[] = [];
   readonly routes = new Map<string, Route>();
 
   readonly fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     const range = new Headers(init?.headers).get("range") ?? undefined;
-    this.calls.push({ url, signal: init?.signal ?? undefined, ...(range !== undefined ? { range } : {}) });
+    this.calls.push({
+      url,
+      signal: init?.signal ?? undefined,
+      ...(range !== undefined ? { range } : {}),
+      ...(init?.cache !== undefined ? { cache: init.cache } : {}),
+    });
     const route = this.routes.get(url);
     if (!route) return new Response("not found", { status: 404 });
     if (init?.signal?.aborted) throw new DOMException("aborted", "AbortError");

@@ -24,6 +24,11 @@ The listing is returned as the Hub sent it (its bytes, capped): parse it as untr
 `ModelsError` with a `kind` (`fetch`, `digest`, `validate`, `backend` or `request`); a file that is simply absent
 (not on the Hub, or not cached while offline) also says so in `missing`.
 
+A large file can be streamed instead of read whole: `streamFile` hands it over a piece at a time, checked against
+the sha256 you give it, and keeps it in Cache Storage for the next visit. Pass `cache: false` when you keep what you
+make of the bytes yourself (a model quantized from them, say): the file is then read from the network, checked the
+same way, and not kept.
+
 ## Models made on the device
 
 A model made in the browser (quantized there, say) is kept in the browser's private file system, under

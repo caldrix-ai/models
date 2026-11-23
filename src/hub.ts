@@ -263,16 +263,21 @@ interface Download {
 }
 
 /** The Hub's answer for a file: a 404 of an optional file remembered, any other failure refused. */
-async function download(l: Lookup, file: string, o: FetchOptions): Promise<Download> {
+async function download(
+  l: Pick<Lookup, "url" | "absent"> & { cache?: Cache; noStore?: boolean },
+  file: string,
+  o: FetchOptions,
+): Promise<Download> {
   let res: Response;
   try {
-    res = await fetch(l.url, { signal: o.signal });
+    // `noStore`: a file never kept, which the browser's HTTP cache does not keep either.
+    res = await fetch(l.url, { signal: o.signal, ...(l.noStore ? { cache: "no-store" as const } : {}) });
   } catch (e) {
     throw fetchFailed(file, o.signal?.aborted ? "was aborted" : `failed: ${reason(e)}`);
   }
   if (res.status === 404 && o.rememberAbsent) {
     try {
-      await l.cache.put(l.url, new Response(null, { headers: { [ABSENT_HEADER]: "1" } }));
+      await l.cache?.put(l.url, new Response(null, { headers: { [ABSENT_HEADER]: "1" } }));
     } catch {
       // not remembered: the next load asks again
     }
@@ -489,6 +494,13 @@ export interface StreamOptions extends FetchOptions {
    * Offline, that rejection is the cached-copy-fails-its-pin refusal instead.
    */
   singlePass?: boolean;
+  /**
+   * `false`: the file is streamed straight from the network and never kept, for a caller that
+   * keeps what it makes of the bytes itself. Cache Storage is neither read nor written (a copy
+   * there is not used), the size and sha256 checks still hold, offline is refused, and
+   * `cached` is `false`. The default, `true`, caches the file as above.
+   */
+  cache?: boolean;
 }
 
 /**
@@ -654,6 +666,7 @@ function partedEntry(cache: Cache, url: string, verified: boolean, partBytes: nu
  * checks pass: a failure of any kind rejects the call and leaves no new entry, and removes none.
  */
 export async function streamFile(repo: string, revision: string, file: string, o: StreamOptions): Promise<StreamedFile> {
+  if (o.cache === false) return streamUncached(repo, revision, file, o);
   const l = await lookup(repo, revision, file, o);
   let pinFailed = false;
   // The cached copy, a whole entry or parts, read in order; each call reads it from its start.
@@ -767,6 +780,23 @@ export async function streamFile(repo: string, revision: string, file: string, o
     await entry.discard(e);
     throw e;
   }
+}
+
+/** `streamFile` under `cache: false`: the network's bytes, checked, never kept. */
+async function streamUncached(repo: string, revision: string, file: string, o: StreamOptions): Promise<StreamedFile> {
+  if (o.offline) throw offlineUncached(file);
+  const url = resolveUrl(repo, revision, file, o.hubBaseUrl);
+  const absent = (where: string) => new ModelsError("fetch", `fetching ${file} failed: HTTP 404${where}`, "not-found");
+  const d = await download({ url, absent, noStore: true }, file, o);
+  const hasher = o.hasher();
+  const loaded = await readBody(d, file, o, async (c, offset) => {
+    hasher.update(c);
+    await o.onChunk(c, offset);
+  });
+  const verified = await checkDigest(file, o, d.etag, () => hasher.finish());
+  if (o.signal?.aborted) throw fetchFailed(file, "was aborted");
+  await o.onEnd?.();
+  return { source: "network", verified, cached: false, loaded };
 }
 
 /**

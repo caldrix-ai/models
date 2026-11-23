@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { BodyPastSize, CACHE_NAME, LISTING_CAP, fetchFile, fetchListing, fetchRange, listingUrl, streamFile, type FetchOptions, type Hasher } from "../../src/hub";
+import { BodyPastSize, CACHE_NAME, LISTING_CAP, fetchFile, fetchListing, fetchRange, listingUrl, streamFile, type FetchOptions, type Hasher, type StreamOptions } from "../../src/hub";
 import { ModelsError } from "../../src/errors";
 import { PART_POLICY_URL } from "../../src/parted";
 import { FakeCaches, FakeFetch } from "./fake-fetch";
@@ -612,7 +612,7 @@ describe("streamFile", () => {
     };
     return { got, onChunk, overlap: () => overlap, bytes: () => got.flatMap(([, b]) => b) };
   }
-  const stream = (s: ReturnType<typeof sink>, extra: Partial<FetchOptions> = {}, file = "model.safetensors") =>
+  const stream = (s: ReturnType<typeof sink>, extra: Partial<StreamOptions> = {}, file = "model.safetensors") =>
     streamFile("org/model", "main", file, { ...opts(extra), hasher: nodeHasher, onChunk: s.onChunk });
   const entry = () => caches.stores.get(CACHE_NAME)?.entries.get(URL_A);
 
@@ -656,6 +656,32 @@ describe("streamFile", () => {
     const etag = await rejection(stream(sink()));
     expect([etag.kind, etag.message]).toEqual(["digest", `model.safetensors: sha256 is ${sha} but the Hub's X-Linked-Etag is ${"0".repeat(64)}`]);
     expect(caches.size()).toBe(0);
+  });
+
+  it("a_stream_with_cache_false_writes_nothing_to_cache_storage", async () => {
+    ff.routes.set(URL_A, { chunks: [BYTES.slice(0, 4), BYTES.slice(4)], headers: { "content-length": "10" } });
+    const sha = await sha256Hex(BYTES);
+    const s = sink();
+    expect(await stream(s, { cache: false, sha256: sha })).toEqual({ source: "network", verified: true, cached: false, loaded: 10 });
+    expect(s.got.map(([o]) => o)).toEqual([0, 4]);
+    expect(s.bytes()).toEqual([...BYTES]);
+    // Nor the browser's HTTP cache: the request asks it to keep nothing.
+    expect(ff.calls.map((c) => c.cache)).toEqual(["no-store"]);
+    // Cache Storage was never opened, let alone written.
+    expect(caches.stores.size).toBe(0);
+    // A copy in the cache is not read either: the network is asked again.
+    await (await caches.open(CACHE_NAME)).put(URL_A, new Response(BYTES, { headers: { "x-caldrix-verified": "1" } }));
+    expect(await stream(sink(), { cache: false })).toMatchObject({ source: "network", cached: false });
+    expect(ff.calls).toHaveLength(2);
+    // The pin still holds: a body that is not the sha256 is a digest refusal.
+    const e = await rejection(stream(sink(), { cache: false, sha256: "ab".repeat(32) }));
+    expect(e.kind).toBe("digest");
+    // The size pin too, and offline refuses (there is no copy it may use).
+    const big = await rejection(stream(sink(), { cache: false, bytes: 4 }));
+    expect(big.kind).toBe("fetch");
+    const off = await rejection(stream(sink(), { cache: false, offline: true }));
+    expect(off.missing).toBe("offline-uncached");
+    expect(caches.stores.get(CACHE_NAME)!.entries.size).toBe(1);
   });
 
   it("a_failed_call_never_removes_an_entry_it_did_not_replace", async () => {

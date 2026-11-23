@@ -3,6 +3,13 @@
 Format after [Keep a Changelog](https://keepachangelog.com/); versions are independent semver, tagged
 `models-js-v<version>`.
 
+## 0.2.0 — unreleased
+
+### Added
+
+- `streamFile`'s `cache: false`: a file streamed from the network and checked, but not kept in Cache Storage (a
+  copy already there is not read) nor in the browser's HTTP cache (its request is `no-store`).
+
 ## 0.1.0 — 2026-11-23
 
 ### Added
