@@ -1,0 +1,57 @@
+{
+  "name": "@caldrix-ai/models",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Hugging Face model files in the browser: resolved at a revision, fetched with their sha256 checked, and kept in the browser's storage.",
+  "license": "Apache-2.0",
+  "homepage": "https://caldrix.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caldrix-ai/models.git"
+  },
+  "keywords": [
+    "llm",
+    "models",
+    "hugging-face",
+    "browser"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "build:test": "tsup --config tsup.test.config.ts",
+    "lint": "eslint . && tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "pack:check": "publint && attw --pack . --ignore-rules cjs-resolves-to-esm"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "1.63.0",
+    "@types/node": "^26.1.1",
+    "eslint": "^9.39.5",
+    "publint": "0.3.25",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^4.1.10"
+  }
+}
