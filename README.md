@@ -56,6 +56,11 @@ cannot be named `model.json`, the record's name. Each record is read back as unt
 malformed, or does not match its file is refused by name, and `list` reports it in `refused` with the reason. Names
 are 1 to 128 letters, digits, `.`, `_` or `-`, not starting with `.`.
 
+A page that only reads made models opens `MadeModels.reader()` (`get` and `list` alone), which needs no file moves or
+Web Locks and creates nothing. A kept file is read like a Hub file: `blobRange(file, name, length, start)` for a span,
+`streamBlob(file, name, options)` for the whole of it a piece at a time, held to the record's size before the first
+piece and to its sha256 after the last.
+
 ## Network
 
 The Hugging Face Hub, and only for the repo you name. `hubBaseUrl` names the Hub's origin (another one for a test server
@@ -64,7 +69,8 @@ or a mirror); `offline: true` serves from the cache alone. Nothing else is conta
 ## Browsers
 
 It needs a secure context (Cache Storage and `crypto.subtle`). Models made on the device need the private file system
-with `FileSystemFileHandle.move`, and Web Locks; `MadeModels.open()` refuses by name a browser without them. It is
+with `FileSystemFileHandle.move`, and Web Locks; `MadeModels.open()` refuses by name a browser without them, and
+`MadeModels.reader()` one without the private file system. It is
 tested in Chromium.
 
 ## License

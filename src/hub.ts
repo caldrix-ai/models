@@ -515,7 +515,8 @@ export class StaleCache extends ModelsError {
 }
 
 export interface StreamedFile {
-  source: "cache" | "network";
+  /** `store`: a kept file read by `streamBlob`, never the Hub. */
+  source: "cache" | "network" | "store";
   verified: boolean;
   /** False when the file is good but could not be written to Cache Storage; the next visit refetches. */
   cached: boolean;
@@ -990,4 +991,68 @@ export async function fetchListing(
     // not cached: offline will not find it, but the call is good
   }
   return { bytes, source: "network" };
+}
+
+/** Why a read of a kept file failed: an error's name and message (a browser's read errors are named). */
+function readWhy(e: unknown): string {
+  return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+}
+
+/**
+ * `length` bytes of a kept file (`blob`, named `file` in errors) from byte `start` (absent: 0), the
+ * reads a load makes before the body: never past the file's end.
+ */
+export async function blobRange(blob: Blob, file: string, length: number, start = 0): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(length) || start < 0 || length < 0 || start + length > blob.size) {
+    throw new ModelsError("validate", `${file}: bytes ${start} to ${start + length} are past its ${blob.size} bytes`);
+  }
+  try {
+    return new Uint8Array(await blob.slice(start, start + length).arrayBuffer());
+  } catch (e) {
+    throw new ModelsError("fetch", `${file}: reading it from the store failed: ${readWhy(e)}`);
+  }
+}
+
+/**
+ * A kept file (`blob`, named `file` in errors) delivered as `streamFile` delivers a Hub file: in order to
+ * `o.onChunk`, each awaited, hashed with `o.hasher()`. A size other than `o.bytes` is refused before the
+ * first chunk, and a sha256 other than `o.sha256` after the last, before `o.onEnd`. Nothing is fetched or
+ * cached; `o.hubBaseUrl`, `o.offline`, `o.cache` and `o.singlePass` are not read.
+ */
+export async function streamBlob(blob: Blob, file: string, o: StreamOptions): Promise<StreamedFile> {
+  const aborted = () => new ModelsError("fetch", `${file}: reading it from the store was aborted`);
+  if (o.signal?.aborted) throw aborted();
+  if (o.bytes !== undefined && blob.size !== o.bytes) {
+    throw new ModelsError("validate", `${file}: ${blob.size} bytes but its record says ${o.bytes}`);
+  }
+  const hasher = o.hasher();
+  const reader = blob.stream().getReader();
+  let loaded = 0;
+  try {
+    for (;;) {
+      let r: ReadableStreamReadResult<Uint8Array>;
+      try {
+        r = await reader.read();
+      } catch (e) {
+        if (o.signal?.aborted) throw aborted();
+        throw new ModelsError("fetch", `${file}: reading it from the store failed: ${readWhy(e)}`);
+      }
+      if (r.done) break;
+      if (o.signal?.aborted) throw aborted();
+      const offset = loaded;
+      loaded += r.value.byteLength;
+      hasher.update(r.value);
+      await o.onChunk(r.value, offset);
+      o.onProgress?.({ file, loaded, total: blob.size });
+    }
+  } finally {
+    reader.cancel().catch(() => undefined);
+  }
+  if (o.signal?.aborted) throw aborted();
+  if (o.sha256 !== undefined) {
+    const got = await hasher.finish();
+    if (got !== o.sha256) throw new ModelsError("digest", `${file}: sha256 is ${got} but its record says ${o.sha256}`);
+  }
+  await o.onEnd?.();
+  return { source: "store", verified: o.sha256 !== undefined, cached: false, loaded };
 }

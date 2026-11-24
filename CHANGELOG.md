@@ -9,6 +9,10 @@ Format after [Keep a Changelog](https://keepachangelog.com/); versions are indep
 
 - `streamFile`'s `cache: false`: a file streamed from the network and checked, but not kept in Cache Storage (a
   copy already there is not read) nor in the browser's HTTP cache (its request is `no-store`).
+- `MadeModels.reader()`: the store to read only (`get`, `list`), with no file moves or Web Locks needed, creating
+  nothing.
+- `blobRange` and `streamBlob`: a kept file read as a Hub file is, a span or the whole of it in pieces, held to its
+  record's size and sha256.
 
 ## 0.1.0 — 2026-11-23
 

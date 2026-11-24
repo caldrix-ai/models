@@ -208,3 +208,55 @@ describe("MadeModels", () => {
 function json(v: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(v));
 }
+
+describe("MadeModels.reader", () => {
+  it("a_reader_lists_and_gets_what_a_writer_committed", async () => {
+    const { root } = fakeRoot();
+    await made(await MadeModels.open(root));
+    const r = await MadeModels.reader(root);
+    expect((await r.list()).models.map((m) => m.name)).toEqual(["qwen3-q8"]);
+    const got = await r.get("qwen3-q8");
+    expect(got.record).toMatchObject({ name: "qwen3-q8", file: "model.gguf", bytes: BYTES.length });
+    expect(new Uint8Array(await got.file.arrayBuffer())).toEqual(BYTES);
+  });
+
+  it("a_reader_of_a_site_that_kept_nothing_creates_nothing_and_knows_no_model", async () => {
+    const { fake, root } = fakeRoot();
+    const r = await MadeModels.reader(root);
+    expect(await r.list()).toEqual({ models: [], refused: [], uncommitted: [] });
+    const e = await refusal(r.get("qwen3-q8"));
+    expect([e.kind, e.message]).toEqual(["request", 'no model named "qwen3-q8" is kept']);
+    expect([...fake.children.keys()]).toEqual([]);
+  });
+
+  it("a_reader_opens_without_move_or_locks", async () => {
+    const { root } = fakeRoot();
+    await made(await MadeModels.open(root));
+    const nav = { storage: { getDirectory: async () => root } };
+    const g = globalThis as { navigator?: unknown; FileSystemFileHandle?: unknown };
+    const saved = [g.navigator, g.FileSystemFileHandle];
+    Object.defineProperty(globalThis, "navigator", { value: nav, configurable: true, writable: true });
+    g.FileSystemFileHandle = undefined;
+    try {
+      const r = await MadeModels.reader();
+      expect((await r.get("qwen3-q8")).record.bytes).toBe(BYTES.length);
+      await expect(MadeModels.open()).rejects.toThrow("FileSystemFileHandle.move");
+    } finally {
+      Object.defineProperty(globalThis, "navigator", { value: saved[0], configurable: true, writable: true });
+      g.FileSystemFileHandle = saved[1];
+    }
+  });
+
+  it("a_reader_refuses_a_browser_without_a_private_file_system", async () => {
+    const g = globalThis as { navigator?: unknown };
+    const saved = g.navigator;
+    Object.defineProperty(globalThis, "navigator", { value: {}, configurable: true, writable: true });
+    try {
+      const e = await refusal(MadeModels.reader());
+      expect(e.kind).toBe("backend");
+      expect(e.message).toContain("navigator.storage.getDirectory");
+    } finally {
+      Object.defineProperty(globalThis, "navigator", { value: saved, configurable: true, writable: true });
+    }
+  });
+});

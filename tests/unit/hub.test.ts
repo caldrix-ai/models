@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { BodyPastSize, CACHE_NAME, LISTING_CAP, fetchFile, fetchListing, fetchRange, listingUrl, streamFile, type FetchOptions, type Hasher, type StreamOptions } from "../../src/hub";
+import { BodyPastSize, CACHE_NAME, LISTING_CAP, blobRange, fetchFile, fetchListing, fetchRange, listingUrl, streamBlob, streamFile, type FetchOptions, type Hasher, type StreamOptions } from "../../src/hub";
 import { ModelsError } from "../../src/errors";
 import { PART_POLICY_URL } from "../../src/parted";
 import { FakeCaches, FakeFetch } from "./fake-fetch";
@@ -904,5 +904,91 @@ describe("the cache keys and headers", () => {
     await get();
     const entry = caches.stores.get("caldrix.js")!.entries.get(URL_A)!;
     expect(entry.headers.get("x-caldrix-sha256")).toBe(await sha256Hex(BYTES));
+  });
+});
+
+describe("a kept file read as a Blob", () => {
+  const nodeHasher = (): Hasher => {
+    const h = createHash("sha256");
+    return { update: (b) => void h.update(b), finish: () => h.digest("hex") };
+  };
+  const BIG = new Uint8Array(300_000).map((_, i) => (i * 7) & 255);
+  const read = (blob: Blob, extra: Partial<StreamOptions> = {}) => {
+    const got: [number, number][] = [];
+    const ended: number[] = [];
+    const p = streamBlob(blob, "m.gguf", {
+      hubBaseUrl: BASE,
+      offline: false,
+      hasher: nodeHasher,
+      onChunk: (b, off) => void got.push([off, b.length]),
+      onEnd: () => void ended.push(1),
+      ...extra,
+    });
+    return { p, got, ended };
+  };
+
+  it("stream_blob_delivers_every_byte_in_order_and_checks_its_sha256", async () => {
+    const sha = await sha256Hex(BIG);
+    const r = read(new Blob([BIG]), { bytes: BIG.length, sha256: sha });
+    expect(await r.p).toEqual({ source: "store", verified: true, cached: false, loaded: BIG.length });
+    let at = 0;
+    for (const [off, n] of r.got) {
+      expect(off).toBe(at);
+      at += n;
+    }
+    expect(at).toBe(BIG.length);
+    expect(r.ended).toEqual([1]);
+    expect(ff.calls).toEqual([]);
+  });
+
+  it("stream_blob_refuses_a_size_other_than_the_pinned_one_before_any_chunk", async () => {
+    const r = read(new Blob([BIG]), { bytes: BIG.length - 1 });
+    const e = await rejection(r.p);
+    expect([e.kind, e.message]).toEqual(["validate", `m.gguf: ${BIG.length} bytes but its record says ${BIG.length - 1}`]);
+    expect(r.got).toEqual([]);
+  });
+
+  it("stream_blob_with_a_wrong_sha256_is_a_digest_error_and_never_calls_onEnd", async () => {
+    const sha = await sha256Hex(BIG);
+    const r = read(new Blob([BIG]), { bytes: BIG.length, sha256: "0".repeat(64) });
+    const e = await rejection(r.p);
+    expect([e.kind, e.message]).toEqual(["digest", `m.gguf: sha256 is ${sha} but its record says ${"0".repeat(64)}`]);
+    expect(r.ended).toEqual([]);
+  });
+
+  it("a_made_file_that_fails_to_read_is_refused_naming_it", async () => {
+    const failing = {
+      size: 20,
+      stream: () =>
+        new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new Uint8Array(10));
+          },
+          pull(c) {
+            c.error(new DOMException("the file changed", "NotReadableError"));
+          },
+        }),
+      slice: () => new Blob([]),
+    } as unknown as Blob;
+    const r = read(failing, { bytes: 20 });
+    const e = await rejection(r.p);
+    expect(e.kind).toBe("fetch");
+    expect(e.message).toBe("m.gguf: reading it from the store failed: NotReadableError: the file changed");
+    expect(r.ended).toEqual([]);
+  });
+
+  it("stream_blob_stops_on_an_aborted_signal", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const e = await rejection(read(new Blob([BIG]), { signal: ac.signal }).p);
+    expect([e.kind, e.message]).toEqual(["fetch", "m.gguf: reading it from the store was aborted"]);
+  });
+
+  it("blob_range_reads_a_span_and_refuses_one_past_the_end", async () => {
+    const b = new Blob([BYTES]);
+    expect([...(await blobRange(b, "m.gguf", 4))]).toEqual([1, 2, 3, 4]);
+    expect([...(await blobRange(b, "m.gguf", 3, 7))]).toEqual([8, 9, 10]);
+    const e = await rejection(blobRange(b, "m.gguf", 4, 8));
+    expect([e.kind, e.message]).toEqual(["validate", "m.gguf: bytes 8 to 12 are past its 10 bytes"]);
   });
 });

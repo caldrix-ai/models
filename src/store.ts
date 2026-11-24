@@ -160,6 +160,40 @@ export class MadeModels {
   }
 
   /**
+   * The store to read only (`get`, `list`): with no `root`, the browser's private file system, refused by
+   * name where the browser lacks it. It needs neither `FileSystemFileHandle.move` nor Web Locks (without
+   * them a name being written in another tab may be listed as uncommitted), and creates nothing: a site
+   * that kept no model has none.
+   */
+  static async reader(root?: FileSystemDirectoryHandle): Promise<Pick<MadeModels, "get" | "list">> {
+    const browserLocks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
+    const locks: Locks = typeof browserLocks?.request === "function" ? browserLocks : REALM_LOCKS;
+    let dir: DirH;
+    if (root) {
+      dir = root as unknown as DirH;
+    } else {
+      const storage = (globalThis as { navigator?: { storage?: { getDirectory?: unknown } } }).navigator?.storage;
+      if (typeof storage?.getDirectory !== "function") {
+        throw new ModelsError("backend", "this browser cannot read made models: it has no private file system (navigator.storage.getDirectory)");
+      }
+      try {
+        dir = (await (storage.getDirectory as () => Promise<unknown>).call(storage)) as DirH;
+      } catch (e) {
+        throw new ModelsError("backend", `this browser refused its private file system: ${String(e)}`);
+      }
+    }
+    for (const part of STORE.made.split("/")) {
+      const next = await dir.getDirectoryHandle(part).catch((e: unknown) => {
+        if ((e as { name?: string }).name === "NotFoundError") return null;
+        throw e;
+      });
+      if (next === null) return EMPTY;
+      dir = next;
+    }
+    return new MadeModels(dir, locks);
+  }
+
+  /**
    * Starts writing the model `name` as `file`. Refuses a name that is already a model or is being written
    * (here or in another tab); clears what a write that never committed left under that name. Runs in a
    * worker: the bytes are written through a synchronous access handle.
@@ -380,3 +414,12 @@ function checkRecord(name: string, v: unknown): MadeRecord {
     by: str("maker", r.by),
   };
 }
+
+/** The reader of a site that kept no model: nothing listed, every name not kept. */
+const EMPTY: Pick<MadeModels, "get" | "list"> = {
+  list: async () => ({ models: [], refused: [], uncommitted: [] }),
+  get: async (name: string) => {
+    segment("model name", name);
+    throw new ModelsError("request", `no model named "${name}" is kept`, "not-found");
+  },
+};
