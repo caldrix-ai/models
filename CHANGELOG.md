@@ -3,7 +3,7 @@
 Format after [Keep a Changelog](https://keepachangelog.com/); versions are independent semver, tagged
 `models-js-v<version>`.
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-11-24
 
 ### Added
 
