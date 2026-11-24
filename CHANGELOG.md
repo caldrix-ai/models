@@ -3,6 +3,18 @@
 Format after [Keep a Changelog](https://keepachangelog.com/); versions are independent semver, tagged
 `models-js-v<version>`.
 
+## 0.2.1 — unreleased
+
+### Added
+
+- `MadeModels`' `kept(name)` (on `open()` and `reader()`): whether a model of that name is kept, without reading
+  its record; a name the store does not keep is refused (`validate`).
+
+### Fixed
+
+- `MadeModels.reader()` refuses by name (`validate`) a part of the store's path that is a file, where it rejected
+  with the browser's own error.
+
 ## 0.2.0 — 2026-11-24
 
 ### Added

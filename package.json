@@ -1,6 +1,6 @@
 {
   "name": "@caldrix-ai/models",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "description": "Hugging Face model files in the browser: resolved at a revision, fetched with their sha256 checked, and kept in the browser's storage.",
   "license": "Apache-2.0",

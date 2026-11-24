@@ -197,6 +197,22 @@ describe("MadeModels", () => {
     expect((await store.list()).models.map((m) => m.name)).toEqual(["cut"]);
   });
 
+  it("kept_says_whether_a_name_has_a_record_whatever_the_record_holds_and_refuses_a_bad_name", async () => {
+    const { fake, root } = fakeRoot();
+    const store = await MadeModels.open(root);
+    expect(await store.kept("none")).toBe(false);
+    const w = await store.begin("one", "one.gguf");
+    expect(await store.kept("one")).toBe(false);
+    w.handle.write(new Uint8Array([9]), { at: 0 });
+    await w.commit({ bytes: 1, sha256: "a".repeat(64), from: { repo: "o/n", revision: "b".repeat(40) }, recipe: "Q8_0", by: "test" });
+    expect(await store.kept("one")).toBe(true);
+    // A record the store refuses still holds the name: begin refuses it too.
+    const bad = await (await madeDir(fake)).getDirectoryHandle("bad", { create: true });
+    (await bad.getFileHandle("model.json", { create: true })).data = new TextEncoder().encode("not json");
+    expect(await store.kept("bad")).toBe(true);
+    await expect(store.kept("../x")).rejects.toMatchObject({ kind: "validate" });
+  });
+
   it("uncommitted_leftovers_are_reported_and_a_write_in_progress_is_not", async () => {
     const { fake, root } = fakeRoot();
     const store = await MadeModels.open(root);
@@ -244,6 +260,16 @@ describe("MadeModels.reader", () => {
     const e = await refusal(r.get("qwen3-q8"));
     expect([e.kind, e.message]).toEqual(["request", 'no model named "qwen3-q8" is kept']);
     expect([...fake.children.keys()]).toEqual([]);
+  });
+
+  it("a_reader_refuses_by_name_a_store_path_part_that_is_a_file", async () => {
+    const { fake, root } = fakeRoot();
+    await fake.getFileHandle("caldrix-ai", { create: true });
+    await expect(MadeModels.reader(root)).rejects.toMatchObject({
+      name: "ModelsError",
+      kind: "validate",
+      message: '"caldrix-ai" in the private file system is a file, not the store\'s directory',
+    });
   });
 
   it("a_reader_opens_without_move_or_locks", async () => {

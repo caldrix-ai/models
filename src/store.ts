@@ -184,7 +184,10 @@ export class MadeModels {
     }
     for (const part of STORE.made.split("/")) {
       const next = await dir.getDirectoryHandle(part).catch((e: unknown) => {
-        if ((e as { name?: string }).name === "NotFoundError") return null;
+        if (errName(e) === "NotFoundError") return null;
+        if (errName(e) === "TypeMismatchError") {
+          throw new ModelsError("validate", `"${part}" in the private file system is a file, not the store's directory`);
+        }
         throw e;
       });
       if (next === null) return EMPTY;
@@ -307,6 +310,16 @@ export class MadeModels {
     models.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     uncommitted.sort();
     return { models, refused, uncommitted };
+  }
+
+  /**
+   * Whether the name `name` is taken by a model: its directory holds a record, whatever the record says (one the
+   * store refuses holds the name as well, and `begin` refuses it alike). Refuses a name the store does not keep.
+   */
+  async kept(name: string): Promise<boolean> {
+    segment("model name", name);
+    const dir = await this.child(name);
+    return dir !== undefined && (await has(dir, RECORD));
   }
 
   /** The committed model `name`: its record, checked, and its file, held to the record's size. */
