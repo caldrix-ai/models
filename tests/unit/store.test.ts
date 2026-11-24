@@ -180,6 +180,23 @@ describe("MadeModels", () => {
     expect((await b.list()).models).toEqual([]);
   });
 
+  it("a_commit_cut_between_its_two_moves_is_uncommitted_never_a_model_and_the_next_begin_clears_it", async () => {
+    const { fake, root } = fakeRoot();
+    const store = await MadeModels.open(root);
+    // What a page that died after the file's move and before the record's leaves: the file under its own name,
+    // the record's partial half written, no record.
+    const dir = await (await madeDir(fake)).getDirectoryHandle("cut", { create: true });
+    (await dir.getFileHandle("cut.gguf", { create: true })).data = new Uint8Array([1, 2, 3]);
+    (await dir.getFileHandle(".model.json.partial", { create: true })).data = new TextEncoder().encode('{"name":"cut","fi');
+    expect(await store.list()).toEqual({ models: [], refused: [], uncommitted: ["cut"] });
+    await expect(store.get("cut")).rejects.toMatchObject({ kind: "request", message: 'no model named "cut" is kept' });
+    const w = await store.begin("cut", "cut.gguf");
+    w.handle.write(new Uint8Array([9]), { at: 0 });
+    const record = await w.commit({ bytes: 1, sha256: "a".repeat(64), from: { repo: "o/n", revision: "b".repeat(40) }, recipe: "Q8_0", by: "test" });
+    expect(record.bytes).toBe(1);
+    expect((await store.list()).models.map((m) => m.name)).toEqual(["cut"]);
+  });
+
   it("uncommitted_leftovers_are_reported_and_a_write_in_progress_is_not", async () => {
     const { fake, root } = fakeRoot();
     const store = await MadeModels.open(root);
